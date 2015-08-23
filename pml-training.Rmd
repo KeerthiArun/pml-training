@@ -1,0 +1,94 @@
+---
+title: "To Predict the Manner of Exercise"
+author: "Keerthi Arun"
+date: "August 20, 2015"
+output: html_document
+---
+
+Our aim is to create a prediction model that can be used to predict the manner in which someone did their exercise. pml-training csv file is used for creating the model. This file can be downloaded from [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+). The classe variable in this training set is a categorical variable quatifying the manner in which our six participants exercised. To Load the data used for creating the prediction model-
+```{r,cache=TRUE}
+pml_training_set <- read.csv( "pml-training.csv")
+```
+###**Preprocessing the training data**
+ We are only interested in those variables that can be used to make an accurate prediction. Starting by removing all those variables that shows near to zero variablity in thier observations.
+```{r, cache=TRUE, results='hide'}
+near0 <- nearZeroVar(pml_training_set)
+pml_training_set <- pml_training_set[,- near0]
+summary(pml_training_set)
+```
+From the summary(Refer Appendix for summary(pml_training_set)), the column X is simply the index of datatable which can be omitted and so can be cvtd_timestamp, can be obtained from columns raw_timestamp_part_1 and raw_timestamp_part_2. we can also remove the column user_name. 
+```{r, cache=TRUE}
+rm_index <- which(names(pml_training_set)== 'X'|names(pml_training_set)== 'cvtd_timestamp'|names(pml_training_set)== 'user_name')
+pml_training_set <- pml_training_set[,- rm_index]
+```
+
+Further looking through the summary, you will notice that there are some categorical variables ,like max_roll_belt, max_picth_arm and many more, that have equally large number of NAs(=19216). On further investigation it is clear that all these NA values are for the same observations. If a variable has large number of missing values compared to its non-missing values, it is better to ignore it from prediction models to avoid incorrect predictions.
+```{r, cache=TRUE}
+NA_index <- apply(pml_training_set,MARGIN = 2,function(x){sum(is.na(x))})
+pml_training_set<- pml_training_set[,which(NA_index!=19216)]
+```
+
+###Regression Modelling
+
+Now let's divide pml_training_set into a training & testing so that later we can use testing dataset to crossvalidate our prediction model. 
+```{r, cache=TRUE}
+library(caret)
+set.seed(100)
+inTrain  <- createDataPartition(y = pml_training_set$classe,p = .7,list = FALSE)
+training <- pml_training_set[inTrain,]
+testing  <- pml_training_set[-inTrain,] 
+```
+Considering non-linearity of variable values we are using regression trees for easier prediction. First, let's use Rpart package.
+```{r, cache=TRUE}
+library(rpart)
+modelfit1 <- train(form = classe~.,data = training, method ="rpart")
+modelfit1$results
+max(modelfit1$results$Accuracy)*100
+```
+Now, lets try the same with a different tree package - Random Forest package.
+```{r , cache=TRUE}
+modelfit2 <- train(form = classe~.,data = training, method = "rf", trControl = trainControl(method = "cv",number = 3,savePredictions = FALSE,allowParallel = TRUE))
+modelfit2$results
+max(modelfit2$results$Accuracy)*100
+```
+Though randomforest method is time consuming than the other, it clearly gives a much better accuracy and accuracy standard deviation. Now, let's test both  models on testing dataset.         
+
+###Crossvalidation  
+
+```{r, cache=TRUE}
+library(rpart)
+pred1 <- predict(modelfit1,testing)
+table(pred1,testing$classe)
+```
+
+From the table above, modelfit1 is not a good prediction model. NOt only there is a large number of cases predicted wrong, but also classe D is never predicted properly at all. Accuracy of this model calculated was `r round(max(modelfit1$results$Accuracy)*100,1)`,whereas modelfit2 gave an accuracy value equal to `r round(max(modelfit2$results$Accuracy)*100,1)`. Now, trying next model-
+
+```{r, cache=TRUE}
+library(randomForest)
+pred2 <- predict(modelfit2,testing)
+table(pred2,testing$classe)
+```
+As expected, this model is much more accurate. Out of sample error for the model is the percentage of number of correct predictions in total number of predictions made. 
+```{r, cache=TRUE}
+False_pred <- pred2 != testing$classe # Creating a logical vector for identifying incorrect predictions.
+sum(False_pred)/sum(table(pred2,testing$classe)) #Out of sample error for training set
+```
+The above value is specific to that data used. To find **expected out of sample error**, let's use confusionMatrix function. This function gives associated statistical values using which we can calculate expected out of sample error.
+```{r, cache=TRUE}
+cm <- confusionMatrix(data = pred2,reference = testing$classe)
+cm$byClass
+```
+cm$byClass object has eight columns and five rows. Balanced Accuracy is the the expected accuracy of the model. Therefore inaccuracy of each classe can be calculated by subtracting accuracy from 1. Now sum of all inaccuracy values divided by total number of inaccuracy values gives the 'Expected Out of Sample Error'.
+```{r, cache=TRUE}
+sum(1 - cm$byClass[,8])/nrow(cm$byClass) # Expected Out of Sample Error
+```
+
+
+###**Appendix**  
+
+###summary(pml_training_set)
+```{r,echo=FALSE,cache=TRUE}
+summary(pml_training_set)
+```
+
